@@ -585,3 +585,97 @@ def get_message_batch(kafka_params, topic, partition, low, high, timeout=None):
     finally:
         consumer.close()
     return out
+
+
+@Stream.register_api(staticmethod)
+class from_rtsp(Source):
+    """ Stream data from a RTSP source. Typically IP Camera
+
+    Parameters
+    ----------
+    host: str
+        IP address of hostname of the RTSP device
+    port: str
+        Port the RTSP service is running on the host device.
+    uri: str
+        URI appending to final uri. EX: "/stream1"
+    username: str
+        The username for the RTSP stream if authentication is required
+    password: str
+        The password for the RTSP stream if authentication is required
+    framerate: Number
+        The number of framerates that should be captured from the RTSP stream per second. Please note this is best
+        effort. If the communication channel cannot keep up with the desired rate the stream will start to fall behind.
+
+    Examples
+    --------
+    >>> source = Stream.from_rtsp("192.168.1.200", username="admin", password="password")  # doctest: +SKIP
+    >>> output = source.map(save_frame).sink(print)  # doctest: +SKIP
+    >>> source.start()  # doctest: +SKIP
+
+    Returns
+    -------
+    Stream
+    """
+
+    def __init__(self, host, uri="/", port="554", username=None, password=None, framerate=10, start=False, **kwargs):
+
+        import cv2
+
+        # User defined parameters
+        self.protocol = "rtsp://"
+        self.host = host
+        self.port = port
+        self.uri = uri
+        self.username = username
+        self.password = password
+        self.framerate = framerate
+        self.wait_time = 60 / self.framerate
+
+        # Setup for reading from VideoCapture
+        self.cap_uri = self.protocol
+        if self.username is not None and self.password is not None:
+            self.cap_uri += self.username + ":" + self.password + "@"
+        self.cap_uri += self.host
+        self.cap_uri += ":" + self.port
+
+        self.video_capture = cv2.VideoCapture(self.cap_uri)
+
+        super(from_rtsp, self).__init__(ensure_io_loop=True, **kwargs)
+        self.stopped = True
+        self.started = False
+
+        if start:
+            self.start()
+
+    @gen.coroutine
+    def read_frame(self):
+        ret, frame = self.video_capture.read()
+        if ret:
+            return frame
+        else:
+            print("Error reading frame from RTSP stream!")
+            return None
+
+    @gen.coroutine
+    def capture_rtsp_frame(self):
+        try:
+            while not self.stopped:
+                self.started = True
+                nxt = gen.sleep(self.wait_time)  # Start the clock.
+                frame = yield self.read_frame()  # Run while the clock is ticking.
+                if frame is not None:
+                    yield self._emit(frame)
+                else:
+                    print("Error!")
+                yield nxt  # Wait for the timer to run out.
+        except Exception as ex:
+            print("Error capturing RTSP frame using OpenCV {}".format(ex))
+        finally:
+            self.video_capture.release()
+
+    def start(self):
+        if self.stopped:
+            self.started = False
+            self.stopped = False
+            self.loop.add_callback(self.capture_rtsp_frame)
