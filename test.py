@@ -22,5 +22,8 @@ def parse_frame(frame):
 
 
 source = Stream.from_rtsp("192.168.1.200", username="admin", password="Rascal18")
-output = source.map(save_frame).sink(print)
+output = source.map(save_frame)
 source.start()
+
+while True:
+    time.sleep(2)

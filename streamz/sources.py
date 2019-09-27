@@ -618,9 +618,12 @@ class from_rtsp(Source):
     Stream
     """
 
-    def __init__(self, host, uri="/", port="554", username=None, password=None, framerate=10, start=False, **kwargs):
+    def __init__(self, host, uri="/", port="554", username=None, password=None, start=False, **kwargs):
 
         import cv2
+
+        # Find OpenCV version
+        (major_ver, minor_ver, subminor_ver) = (cv2.__version__).split('.')
 
         # User defined parameters
         self.protocol = "rtsp://"
@@ -629,8 +632,8 @@ class from_rtsp(Source):
         self.uri = uri
         self.username = username
         self.password = password
-        self.framerate = framerate
-        self.wait_time = 60 / self.framerate
+
+        print("OpenCV: {}.{}.{}".format(major_ver, minor_ver, subminor_ver))
 
         # Setup for reading from VideoCapture
         self.cap_uri = self.protocol
@@ -640,6 +643,16 @@ class from_rtsp(Source):
         self.cap_uri += ":" + self.port
 
         self.video_capture = cv2.VideoCapture(self.cap_uri)
+
+        if int(major_ver) < 3:
+            self.frame_rate = self.video_capture.get(cv2.cv.CV_CAP_PROP_FPS)
+            print("Frames per second using video.get(cv2.cv.CV_CAP_PROP_FPS): {0}".format(self.frame_rate))
+        else:
+            self.frame_rate = self.video_capture.get(cv2.CAP_PROP_FPS)
+            print("Frames per second using video.get(cv2.CAP_PROP_FPS) : {0}".format(self.frame_rate))
+
+        self.wait_time = self.frame_rate / 60
+        print("Wait Time: {}".format(self.wait_time))
 
         super(from_rtsp, self).__init__(ensure_io_loop=True, **kwargs)
         self.stopped = True
