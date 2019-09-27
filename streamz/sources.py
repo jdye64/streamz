@@ -675,8 +675,8 @@ class from_rtsp(Source):
         try:
             while not self.stopped:
                 self.started = True
-                nxt = gen.sleep(self.wait_time)  # Start the clock.
-                frame = yield self.read_frame()  # Run while the clock is ticking.
+                nxt = gen.sleep(self.wait_time)
+                frame = yield self.read_frame()
                 if frame is not None:
                     yield self._emit(frame)
                 else:
