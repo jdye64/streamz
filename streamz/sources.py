@@ -20,7 +20,7 @@ def PeriodicCallback(callback, callback_time, asynchronous=False, **kwargs):
     return source
 
 
-def sink_to_file(filename, upstream, mode='w', prefix='', suffix='\n', flush=False):
+def sink_to_file(filename, upstream, mode="w", prefix="", suffix="\n", flush=False):
     file = open(filename, mode=mode)
 
     def write(text):
@@ -33,7 +33,7 @@ def sink_to_file(filename, upstream, mode='w', prefix='', suffix='\n', flush=Fal
 
 
 class Source(Stream):
-    _graphviz_shape = 'doubleoctagon'
+    _graphviz_shape = "doubleoctagon"
 
     def __init__(self, **kwargs):
         self.stopped = True
@@ -43,6 +43,98 @@ class Source(Stream):
         # fallback stop method - for poll functions with while not self.stopped
         if not self.stopped:
             self.stopped = True
+
+
+@Stream.register_api(staticmethod)
+class video_capture(Source):
+    """ Captures individual frames from a video source.
+
+    Parameters
+    ----------
+    hostname: string
+        Hostname or IP address of the target RTSP device
+    port: Number
+        Port the RTSP server is running on the target device
+    username: string
+        Username if the RTSP device supports authentication
+    password: string
+        Password if the RTSP device supports authentication
+    channel: string
+        RTSP channel that will be captured from the target device
+    fps: Number
+        Number of frames that should be captured from the device per second. Keep in
+        mind if this rate is more than the device is physically recording at duplicate
+        frames could be ommited from this source.
+    start: bool
+        Whether to start running immediately; otherwise call stream.start()
+        explicitly.
+
+    Examples
+    --------
+    >>> source = Stream.from_rtsp('192.168.1.200', port=554, username='username', password='secret', channel='/stream1, frame_rate=15)  # doctest: +SKIP
+    >>> source = Stream.from_rtsp('fakehost.yourdomain.com', username='username', password='secret', channel='/stream1, frame_rate=10)  # doctest: +SKIP
+
+    Returns
+    -------
+    Stream
+    """
+
+    def __init__(
+        self,
+        hostname,
+        port=554,
+        username=None,
+        password=None,
+        channel=None,
+        fps=10,
+        start=False,
+        **kwargs
+    ):
+
+        self.device_uri = "rtsp://"
+
+        if username is not None:
+            self.device_uri = self.device_uri + username + ":" + password + "@"
+
+        self.device_uri = self.device_uri + hostname + ":" + str(port)
+
+        if channel is not None:
+            self.device_uri = self.device_uri + "/" + channel
+
+        self.vcap = None
+        self.hostname = hostname
+        self.port = port
+        self.username = username
+        self.password = password
+        self.channel = channel
+        self.fps = fps
+        self.target_fps_interupt_time = 1 / self.fps
+
+        super(video_capture, self).__init__(ensure_io_loop=True, **kwargs)
+        self.stopped = True
+        self.started = False
+        if start:
+            self.start()
+
+    def start(self):
+        import cv2
+
+        print("Starting capture")
+        self.vcap = cv2.VideoCapture(self.device_uri)
+        self.stopped = False
+        self.started = False
+        self.loop.add_callback(self.capture_frame)
+
+    @gen.coroutine
+    def capture_frame(self):
+        self.started = True
+        print("Capture frame called. self.stopped == " + str(self.stopped))
+        while not self.stopped:
+            print("frame captured")
+            nxt = gen.sleep(self.target_fps_interupt_time)
+            yield self._emit(self.vcap.read())
+            yield nxt
+        print("Self.stopped == True")
 
 
 @Stream.register_api(staticmethod)
@@ -74,8 +166,16 @@ class from_textfile(Source):
     -------
     Stream
     """
-    def __init__(self, f, poll_interval=0.100, delimiter='\n', start=False,
-                 from_end=False, **kwargs):
+
+    def __init__(
+        self,
+        f,
+        poll_interval=0.100,
+        delimiter="\n",
+        start=False,
+        from_end=False,
+        **kwargs
+    ):
         if isinstance(f, str):
             f = open(f)
         self.file = f
@@ -96,7 +196,7 @@ class from_textfile(Source):
 
     @gen.coroutine
     def do_poll(self):
-        buffer = ''
+        buffer = ""
         if self.from_end:
             # this only happens when we are ready to read
             self.file.seek(0, 2)
@@ -133,12 +233,13 @@ class filenames(Source):
     >>> source = Stream.filenames('path/to/dir')  # doctest: +SKIP
     >>> source = Stream.filenames('path/to/*.csv', poll_interval=0.500)  # doctest: +SKIP
     """
+
     def __init__(self, path, poll_interval=0.100, start=False, **kwargs):
-        if '*' not in path:
+        if "*" not in path:
             if os.path.isdir(path):
                 if not path.endswith(os.path.sep):
-                    path = path + '/'
-                path = path + '*'
+                    path = path + "/"
+                path = path + "*"
         self.path = path
         self.seen = set()
         self.poll_interval = poll_interval
@@ -191,8 +292,8 @@ class from_tcp(Source):
 
     >>> source = Source.from_tcp(4567)  # doctest: +SKIP
     """
-    def __init__(self, port, delimiter=b'\n', start=False,
-                 server_kwargs=None):
+
+    def __init__(self, port, delimiter=b"\n", start=False, server_kwargs=None):
         super(from_tcp, self).__init__(ensure_io_loop=True)
         self.stopped = True
         self.server_kwargs = server_kwargs or {}
@@ -260,7 +361,7 @@ class from_http_server(Source):
 
     """
 
-    def __init__(self, port, path='/.*', start=False, server_kwargs=None):
+    def __init__(self, port, path="/.*", start=False, server_kwargs=None):
         self.port = port
         self.path = path
         self.server_kwargs = server_kwargs or {}
@@ -280,11 +381,9 @@ class from_http_server(Source):
             @gen.coroutine
             def post(self):
                 yield self.source._emit(self.request.body)
-                self.write('OK')
+                self.write("OK")
 
-        application = Application([
-            (self.path, Handler),
-        ])
+        application = Application([(self.path, Handler),])
         self.server = HTTPServer(application, **self.server_kwargs)
         self.server.listen(self.port)
 
@@ -342,12 +441,14 @@ class from_process(Source):
         from tornado.process import Subprocess
         from tornado.iostream import StreamClosedError
         import subprocess
+
         stderr = subprocess.STDOUT if self.with_stderr else subprocess.PIPE
-        process = Subprocess(self.cmd, stdout=Subprocess.STREAM,
-                             stderr=stderr, **self.open_kwargs)
+        process = Subprocess(
+            self.cmd, stdout=Subprocess.STREAM, stderr=stderr, **self.open_kwargs
+        )
         while not self.stopped:
             try:
-                out = yield process.stdout.read_until(b'\n')
+                out = yield process.stdout.read_until(b"\n")
             except StreamClosedError:
                 # process exited
                 break
@@ -401,7 +502,10 @@ class from_kafka(Source):
     ...            'group.id': 'streamz'})  # doctest: +SKIP
 
     """
-    def __init__(self, topics, consumer_params, poll_interval=0.1, start=False, **kwargs):
+
+    def __init__(
+        self, topics, consumer_params, poll_interval=0.1, start=False, **kwargs
+    ):
         self.cpars = consumer_params
         self.consumer = None
         self.topics = topics
@@ -431,6 +535,7 @@ class from_kafka(Source):
 
     def start(self):
         import confluent_kafka as ck
+
         if self.stopped:
             self.stopped = False
             self.consumer = ck.Consumer(self.cpars)
@@ -452,8 +557,10 @@ class from_kafka(Source):
 
 class FromKafkaBatched(Stream):
     """Base class for both local and cluster-based batched kafka processing"""
-    def __init__(self, topic, consumer_params, poll_interval='1s',
-                 npartitions=1, **kwargs):
+
+    def __init__(
+        self, topic, consumer_params, poll_interval="1s", npartitions=1, **kwargs
+    ):
         self.consumer_params = consumer_params
         self.topic = topic
         self.npartitions = npartitions
@@ -473,15 +580,21 @@ class FromKafkaBatched(Stream):
                 for partition in range(self.npartitions):
                     tp = ck.TopicPartition(self.topic, partition, 0)
                     try:
-                        low, high = self.consumer.get_watermark_offsets(
-                            tp, timeout=0.1)
+                        low, high = self.consumer.get_watermark_offsets(tp, timeout=0.1)
                     except (RuntimeError, ck.KafkaException):
                         continue
                     current_position = self.positions[partition]
                     lowest = max(current_position, low)
                     if high > lowest:
-                        out.append((self.consumer_params, self.topic, partition,
-                                    lowest, high - 1))
+                        out.append(
+                            (
+                                self.consumer_params,
+                                self.topic,
+                                partition,
+                                lowest,
+                                high - 1,
+                            )
+                        )
                         self.positions[partition] = high
 
                 for part in out:
@@ -495,6 +608,7 @@ class FromKafkaBatched(Stream):
 
     def start(self):
         import confluent_kafka as ck
+
         if self.stopped:
             self.consumer = ck.Consumer(self.consumer_params)
             self.stopped = False
@@ -506,8 +620,15 @@ class FromKafkaBatched(Stream):
 
 
 @Stream.register_api(staticmethod)
-def from_kafka_batched(topic, consumer_params, poll_interval='1s',
-                       npartitions=1, start=False, dask=False, **kwargs):
+def from_kafka_batched(
+    topic,
+    consumer_params,
+    poll_interval="1s",
+    npartitions=1,
+    start=False,
+    dask=False,
+    **kwargs
+):
     """ Get messages from Kafka in batches
 
     Uses the confluent-kafka library,
@@ -546,10 +667,15 @@ def from_kafka_batched(topic, consumer_params, poll_interval='1s',
     """
     if dask:
         from distributed.client import default_client
-        kwargs['loop'] = default_client().loop
-    source = FromKafkaBatched(topic, consumer_params,
-                              poll_interval=poll_interval,
-                              npartitions=npartitions, **kwargs)
+
+        kwargs["loop"] = default_client().loop
+    source = FromKafkaBatched(
+        topic,
+        consumer_params,
+        poll_interval=poll_interval,
+        npartitions=npartitions,
+        **kwargs
+    )
     if dask:
         source = source.scatter()
 
@@ -565,6 +691,7 @@ def get_message_batch(kafka_params, topic, partition, low, high, timeout=None):
     This will block until messages are available, or timeout is reached.
     """
     import confluent_kafka as ck
+
     t0 = time.time()
     consumer = ck.Consumer(kafka_params)
     tp = ck.TopicPartition(topic, partition, low)
